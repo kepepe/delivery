@@ -1,0 +1,7 @@
+{
+  "name": "Drivee Delivery",
+  "description": "Сервис курьерской доставки в реальном времени с торгами, созданием заказов, интерактивной картой и открытием в Google Maps",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
