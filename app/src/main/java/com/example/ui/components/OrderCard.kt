@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -34,6 +35,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -148,6 +155,74 @@ fun OrderCard(
               fontSize = 12.sp,
               modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
             )
+          }
+        }
+      }
+
+      val isNew = order.status == OrderStatus.NEW
+      var currentTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+      LaunchedEffect(isNew) {
+        if (isNew) {
+          while (true) {
+            delay(1000)
+            currentTime = System.currentTimeMillis()
+          }
+        }
+      }
+      val remainingSeconds = order.remainingAcceptanceSeconds(currentTime)
+
+      if (isNew) {
+        Spacer(modifier = Modifier.height(8.dp))
+        if (order.bids.isEmpty()) {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (remainingSeconds <= 10) DriveeRedLight else DriveeOrangeLight,
+            border = BorderStroke(1.dp, if (remainingSeconds <= 10) DriveeRed else DriveeOrange),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.Default.Timer,
+                contentDescription = null,
+                tint = if (remainingSeconds <= 10) DriveeRed else DriveeOrange,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Таймер отклика: $remainingSeconds сек (не успеете — заказ исчезнет)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (remainingSeconds <= 10) DriveeRed else DriveeOrange
+              )
+            }
+          }
+        } else {
+          Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = DriveeGreenContainer,
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.Default.Timer,
+                contentDescription = null,
+                tint = DriveeGreenDark,
+                modifier = Modifier.size(16.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Курьер откликнулся • Заказ сохранен",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = DriveeGreenDark
+              )
+            }
           }
         }
       }

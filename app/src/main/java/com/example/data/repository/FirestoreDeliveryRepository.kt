@@ -126,7 +126,11 @@ class FirestoreDeliveryRepository : DeliveryRepository {
             if (currentActiveId != null) {
               val updatedActive = fetchedOrders.find { it.id == currentActiveId }
               if (updatedActive != null) {
-                _activeOrder.value = updatedActive
+                if (updatedActive.status == OrderStatus.DELIVERED || updatedActive.status == OrderStatus.CANCELLED) {
+                  _activeOrder.value = null
+                } else {
+                  _activeOrder.value = updatedActive
+                }
               }
             }
           }
@@ -164,6 +168,7 @@ class FirestoreDeliveryRepository : DeliveryRepository {
     senderPhone: String
   ): DeliveryOrder {
     val orderId = "ord_${System.currentTimeMillis()}"
+    val now = System.currentTimeMillis()
     val order = DeliveryOrder(
       id = orderId,
       pickupAddress = pickupAddress,
@@ -177,8 +182,9 @@ class FirestoreDeliveryRepository : DeliveryRepository {
       senderPhone = senderPhone,
       clientName = "Заказчик",
       clientRating = 5.0,
-      status = OrderStatus.BARGAINING,
-      createdAt = System.currentTimeMillis()
+      status = OrderStatus.NEW,
+      createdAt = now,
+      expiresAt = now + 15_000L
     )
 
     // Local optimistic update
@@ -306,19 +312,107 @@ class FirestoreDeliveryRepository : DeliveryRepository {
     val target = _orders.value.find { it.id == orderId } ?: return
     val updated = target.copy(status = newStatus)
 
-    updateLocalOrder(updated)
+    if (newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.CANCELLED) {
+      // Permanently remove from active list
+      _orders.value = _orders.value.filterNot { it.id == orderId }
+      if (_activeOrder.value?.id == orderId) {
+        _activeOrder.value = null
+      }
+      if (newStatus == OrderStatus.DELIVERED) {
+        val earned = updated.priceRub
+        val curCourier = _courierProfile.value
+        val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        val fee = (earned * (curCourier.serviceFeePercent / 100.0)).toInt()
+        val tax = (earned * (curCourier.taxPercent / 100.0)).toInt()
+        val net = earned - fee - tax
+        val histRecord = com.example.data.model.ShiftOrderHistory(
+          id = orderId,
+          timeText = timeStr,
+          routeText = "${updated.pickupAddress} → ${updated.dropoffAddress}",
+          grossAmountRub = earned,
+          feeRub = fee,
+          taxRub = tax,
+          netAmountRub = net
+        )
+        _courierProfile.value = curCourier.copy(
+          completedOrdersCount = curCourier.completedOrdersCount + 1,
+          balanceRub = curCourier.balanceRub + earned,
+          shiftGrossRub = curCourier.shiftGrossRub + earned,
+          orderHistory = listOf(histRecord) + curCourier.orderHistory
+        )
+      }
+    } else {
+      updateLocalOrder(updated)
+    }
     _toastEvents.tryEmit("Статус заказа: ${newStatus.titleRu}")
 
     val db = firestore
     if (db != null) {
       try {
-        db.collection("orders").document(orderId).update(
-          "status", newStatus.name
-        ).await()
+        if (newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.CANCELLED) {
+          db.collection("orders").document(orderId).delete().await()
+        } else {
+          db.collection("orders").document(orderId).update(
+            "status", newStatus.name
+          ).await()
+        }
       } catch (e: Exception) {
         Log.e(tag, "Failed to update status in Firestore: ${e.message}")
       }
     }
+  }
+
+  override suspend fun updateCourierLocation(orderId: String, lat: Double, lng: Double, heading: Float) {
+    val target = _orders.value.find { it.id == orderId } ?: _activeOrder.value
+    if (target != null && target.id == orderId) {
+      val updated = target.copy(courierLat = lat, courierLng = lng, courierHeading = heading)
+      updateLocalOrder(updated)
+      val db = firestore
+      if (db != null) {
+        try {
+          db.collection("orders").document(orderId).update(
+            mapOf(
+              "courierLat" to lat,
+              "courierLng" to lng,
+              "courierHeading" to heading
+            )
+          ).await()
+        } catch (e: Exception) {
+          // ignore or log
+        }
+      }
+    }
+  }
+
+  override suspend fun removeExpiredOrders() {
+    val now = System.currentTimeMillis()
+    val current = _orders.value
+    val filtered = current.filterNot { it.isExpired(now) }
+    if (filtered.size != current.size) {
+      _orders.value = filtered
+      if (_activeOrder.value?.let { it.isExpired(now) } == true) {
+        _activeOrder.value = null
+      }
+    }
+  }
+
+  override suspend fun deleteOrderPermanently(orderId: String) {
+    _orders.value = _orders.value.filterNot { it.id == orderId }
+    if (_activeOrder.value?.id == orderId) {
+      _activeOrder.value = null
+    }
+    firestore?.collection("orders")?.document(orderId)?.delete()
+  }
+
+  override suspend fun clearOrderHistory() {
+    val curCourier = _courierProfile.value
+    _courierProfile.value = curCourier.copy(
+      orderHistory = emptyList(),
+      shiftGrossRub = 0
+    )
+    _orders.value = emptyList()
+    _activeOrder.value = null
+    _toastEvents.tryEmit("История заказов полностью очищена")
   }
 
   private fun updateLocalOrder(updatedOrder: DeliveryOrder) {
@@ -331,7 +425,11 @@ class FirestoreDeliveryRepository : DeliveryRepository {
       _orders.value = listOf(updatedOrder) + current
     }
     if (_activeOrder.value?.id == updatedOrder.id) {
-      _activeOrder.value = updatedOrder
+      if (updatedOrder.status == OrderStatus.DELIVERED || updatedOrder.status == OrderStatus.CANCELLED) {
+        _activeOrder.value = null
+      } else {
+        _activeOrder.value = updatedOrder
+      }
     }
   }
 }

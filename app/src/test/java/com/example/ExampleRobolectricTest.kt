@@ -8,6 +8,7 @@ import com.example.data.repository.LocalPropDeliveryRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -89,13 +90,16 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `order lifecycle reaches delivered status`() = runBlocking {
+  fun `order lifecycle reaches delivered status and removes from active feed`() = runBlocking {
     val repo = LocalPropDeliveryRepository()
     val initial = repo.orders.value.first()
     repo.acceptOrderDirectly(initial.id, "c_1", "Курьер")
     repo.updateOrderStatus(initial.id, OrderStatus.DELIVERED)
     val finalOrder = repo.orders.value.find { it.id == initial.id }
-    assertEquals(OrderStatus.DELIVERED, finalOrder?.status)
+    // As requested: delivered orders are permanently removed from the active feed
+    assertNull(finalOrder)
+    // And recorded in courier shift history
+    assertTrue(repo.courierProfile.value.orderHistory.any { it.id == initial.id })
   }
 }
 

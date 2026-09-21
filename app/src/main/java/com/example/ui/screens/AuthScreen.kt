@@ -23,7 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
@@ -163,7 +163,7 @@ fun AuthScreen(
       contentAlignment = Alignment.Center
     ) {
       Icon(
-        imageVector = Icons.Default.DirectionsBike,
+        imageVector = Icons.Default.LocalShipping,
         contentDescription = null,
         tint = Color.Black,
         modifier = Modifier.size(40.dp)
@@ -224,7 +224,7 @@ fun AuthScreen(
           verticalArrangement = Arrangement.Center
         ) {
           Icon(
-            imageVector = Icons.Default.DirectionsBike,
+            imageVector = Icons.Default.LocalShipping,
             contentDescription = null,
             tint = if (selectedRole == UserRole.COURIER) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
           )

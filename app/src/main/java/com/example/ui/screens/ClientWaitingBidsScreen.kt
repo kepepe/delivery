@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -54,7 +55,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +69,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CourierBid
@@ -75,6 +82,8 @@ import com.example.ui.theme.DriveeGreenDark
 import com.example.ui.theme.DriveeOrange
 import com.example.ui.theme.DriveeOrangeLight
 import com.example.ui.theme.DriveeRed
+import com.example.ui.theme.DriveeRedLight
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,8 +95,20 @@ fun ClientWaitingBidsScreen(
   modifier: Modifier = Modifier
 ) {
   val context = LocalContext.current
-  val isCourierAssigned = order.status == OrderStatus.ACCEPTED_BY_COURIER || order.status == OrderStatus.IN_TRANSIT || order.status == OrderStatus.DELIVERED
+  val isDelivered = order.status == OrderStatus.DELIVERED
+  val isCourierAssigned = (order.status == OrderStatus.ACCEPTED_BY_COURIER || order.status == OrderStatus.IN_TRANSIT) && !isDelivered
   val acceptedBid = order.bids.find { it.isAccepted } ?: order.bids.firstOrNull { it.courierName == order.assignedCourierName }
+  var clientRating by remember { mutableIntStateOf(5) }
+  var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+  LaunchedEffect(order.id) {
+    while (true) {
+      delay(1000)
+      nowMs = System.currentTimeMillis()
+    }
+  }
+
+  val remainingSeconds = order.remainingAcceptanceSeconds(nowMs)
 
   val infiniteTransition = rememberInfiniteTransition(label = "radar")
   val rotation by infiniteTransition.animateFloat(
@@ -105,7 +126,11 @@ fun ClientWaitingBidsScreen(
       TopAppBar(
         title = {
           Text(
-            text = if (isCourierAssigned) "Курьер в пути" else "Поиск курьеров",
+            text = when {
+              isDelivered -> "Заказ доставлен!"
+              isCourierAssigned -> "Курьер в пути"
+              else -> "Поиск курьеров"
+            },
             fontWeight = FontWeight.Bold,
             fontSize = 18.sp
           )
@@ -116,15 +141,15 @@ fun ClientWaitingBidsScreen(
           }
         },
         actions = {
-          if (!isCourierAssigned) {
+          if (!isCourierAssigned || isDelivered) {
             OutlinedButton(
               onClick = onCancelOrder,
               shape = RoundedCornerShape(10.dp),
-              border = BorderStroke(1.dp, DriveeRed),
-              colors = ButtonDefaults.outlinedButtonColors(contentColor = DriveeRed),
+              border = BorderStroke(1.dp, if (isDelivered) DriveeGreenDark else DriveeRed),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = if (isDelivered) DriveeGreenDark else DriveeRed),
               modifier = Modifier.padding(end = 12.dp)
             ) {
-              Text("Отменить", fontSize = 12.sp)
+              Text(if (isDelivered) "Готово" else "Отменить", fontSize = 12.sp)
             }
           }
         },
@@ -140,17 +165,73 @@ fun ClientWaitingBidsScreen(
         .verticalScroll(rememberScrollState())
     ) {
       // Top Status Banner / Interactive Map
-      if (isCourierAssigned) {
+      if (isDelivered) {
+        Surface(
+          shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+          color = DriveeGreenContainer,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Box(
+              modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape)
+                .background(DriveeGreenDark),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White, modifier = Modifier.size(38.dp))
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+              text = "Посылка успешно доставлена!",
+              fontWeight = FontWeight.Bold,
+              fontSize = 19.sp,
+              color = DriveeGreenDark,
+              textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = "Курьер передал заказ по адресу ${order.dropoffAddress}",
+              fontSize = 13.sp,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+              textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+              onClick = onCancelOrder,
+              shape = RoundedCornerShape(12.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = DriveeGreen, contentColor = Color.Black),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("delivered_new_order_btn")
+            ) {
+              Text("Создать новый заказ", fontWeight = FontWeight.Bold)
+            }
+          }
+        }
+      } else if (isCourierAssigned) {
         InteractiveRouteMap(
           modifier = Modifier
             .fillMaxWidth()
-            .height(240.dp)
+            .height(250.dp)
             .testTag("client_tracking_map"),
           distanceKm = order.distanceKm,
           etaMinutes = acceptedBid?.etaMinutes ?: 8,
           isDarkTheme = isDarkTheme,
           pickupAddress = order.pickupAddress,
-          dropoffAddress = order.dropoffAddress
+          dropoffAddress = order.dropoffAddress,
+          startLat = order.startLat.toDouble(),
+          startLng = order.startLng.toDouble(),
+          endLat = order.endLat.toDouble(),
+          endLng = order.endLng.toDouble(),
+          courierLat = order.courierLat,
+          courierLng = order.courierLng,
+          courierHeading = order.courierHeading,
+          isLiveTracking = true
         )
 
         Surface(
@@ -233,6 +314,38 @@ fun ClientWaitingBidsScreen(
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // 15 seconds order response countdown chip
+            Surface(
+              shape = RoundedCornerShape(12.dp),
+              color = if (remainingSeconds <= 5) DriveeRedLight else DriveeOrangeLight,
+              modifier = Modifier.testTag("client_waiting_timer_chip")
+            ) {
+              Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Icon(
+                  imageVector = Icons.Default.Timer,
+                  contentDescription = null,
+                  tint = if (remainingSeconds <= 5) DriveeRed else DriveeOrange,
+                  modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = if (remainingSeconds > 0) {
+                    "Таймер отклика: $remainingSeconds сек (лимит 15 с)"
+                  } else {
+                    "Время ожидания (15 с) истекло"
+                  },
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = if (remainingSeconds <= 5) DriveeRed else DriveeOrange
+                )
+              }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Order Route Summary
@@ -260,25 +373,30 @@ fun ClientWaitingBidsScreen(
                     ) {
                       Icon(Icons.Default.Map, contentDescription = null, tint = DriveeGreenDark, modifier = Modifier.size(14.dp))
                       Spacer(modifier = Modifier.width(4.dp))
-                      Text("Карта активна выше", color = DriveeGreenDark, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                      Text("OSM Карта активна", color = DriveeGreenDark, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                   }
 
                   OutlinedButton(
                     onClick = {
                       try {
-                        val uri = Uri.parse("https://www.google.com/maps/dir/?api=1&origin=${Uri.encode(order.pickupAddress + ", " + order.city)}&destination=${Uri.encode(order.dropoffAddress + ", " + order.city)}&travelmode=driving")
+                        val uri = Uri.parse("geo:${order.startLat},${order.startLng}?q=${Uri.encode(order.dropoffAddress + ", " + order.city)}")
                         val mapIntent = Intent(Intent.ACTION_VIEW, uri)
                         context.startActivity(mapIntent)
-                      } catch (_: Exception) {}
+                      } catch (_: Exception) {
+                        try {
+                          val webUri = Uri.parse("https://www.openstreetmap.org/search?query=${Uri.encode(order.dropoffAddress + ", " + order.city)}")
+                          context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                        } catch (_: Exception) {}
+                      }
                     },
-                    modifier = Modifier.testTag("waiting_open_google_maps_btn"),
+                    modifier = Modifier.testTag("waiting_open_external_maps_btn"),
                     shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                   ) {
                     Icon(Icons.Default.Navigation, contentDescription = null, tint = DriveeGreenDark, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Google Maps", fontSize = 11.sp)
+                    Text("Навигатор", fontSize = 11.sp)
                   }
                 }
               }
@@ -291,7 +409,55 @@ fun ClientWaitingBidsScreen(
 
       // Section: Bidding Couriers or Assigned Driver Card
       Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        if (isCourierAssigned) {
+        if (isDelivered) {
+          // Driver review and delivery complete card
+          Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Column(
+              modifier = Modifier.padding(16.dp),
+              horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+              Text(
+                text = "Курьер: ${order.assignedCourierName ?: acceptedBid?.courierName ?: "Айсен В."}",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+              )
+              Text(
+                text = acceptedBid?.vehicle ?: "Toyota Corolla • белый",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Spacer(modifier = Modifier.height(12.dp))
+              Text("Оцените качество доставки:", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+              Spacer(modifier = Modifier.height(8.dp))
+              Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (star in 1..5) {
+                  Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = "Star $star",
+                    tint = if (star <= clientRating) DriveeOrange else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                    modifier = Modifier
+                      .size(36.dp)
+                      .clickable { clientRating = star }
+                  )
+                }
+              }
+              Spacer(modifier = Modifier.height(16.dp))
+              Button(
+                onClick = onCancelOrder,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = DriveeGreen, contentColor = Color.Black)
+              ) {
+                Text("Завершить и закрыть заказ", fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+        } else if (isCourierAssigned) {
           // Driver details card
           Card(
             shape = RoundedCornerShape(18.dp),

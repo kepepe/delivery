@@ -49,8 +49,9 @@ class LocalPropDeliveryRepository(
     tags: List<String>,
     senderPhone: String
   ): DeliveryOrder {
+    val now = System.currentTimeMillis()
     val newOrder = DeliveryOrder(
-      id = "ord_${System.currentTimeMillis() % 100000}",
+      id = "ord_${now % 100000}",
       pickupAddress = pickupAddress,
       dropoffAddress = dropoffAddress,
       city = "Якутск",
@@ -62,8 +63,9 @@ class LocalPropDeliveryRepository(
       senderPhone = senderPhone.ifEmpty { "+7 (914) 271-88-00" },
       clientName = "Вы (Заказчик)",
       clientRating = 5.0,
-      status = OrderStatus.BARGAINING,
-      createdAt = System.currentTimeMillis()
+      status = OrderStatus.NEW,
+      createdAt = now,
+      expiresAt = now + 15_000L
     )
 
     _orders.value = listOf(newOrder) + _orders.value
@@ -227,17 +229,105 @@ class LocalPropDeliveryRepository(
     val current = _orders.value.toMutableList()
     val index = current.indexOfFirst { it.id == orderId }
     if (index != -1) {
-      val updated = current[index].copy(status = newStatus)
-      current[index] = updated
-      _orders.value = current
-      if (_activeOrder.value?.id == orderId) {
-        _activeOrder.value = updated
+      val original = current[index]
+      val updated = original.copy(status = newStatus)
+
+      if (newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.CANCELLED) {
+        // Permanently remove finished/cancelled order from active list
+        current.removeAt(index)
+        _orders.value = current
+        if (_activeOrder.value?.id == orderId) {
+          _activeOrder.value = null
+        }
+        if (newStatus == OrderStatus.DELIVERED) {
+          val earned = updated.priceRub
+          val curCourier = _courierProfile.value
+          val timeStr = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+          val fee = (earned * (curCourier.serviceFeePercent / 100.0)).toInt()
+          val tax = (earned * (curCourier.taxPercent / 100.0)).toInt()
+          val net = earned - fee - tax
+          val histRecord = com.example.data.model.ShiftOrderHistory(
+            id = orderId,
+            timeText = timeStr,
+            routeText = "${updated.pickupAddress} → ${updated.dropoffAddress}",
+            grossAmountRub = earned,
+            feeRub = fee,
+            taxRub = tax,
+            netAmountRub = net
+          )
+          _courierProfile.value = curCourier.copy(
+            completedOrdersCount = curCourier.completedOrdersCount + 1,
+            balanceRub = curCourier.balanceRub + earned,
+            shiftGrossRub = curCourier.shiftGrossRub + earned,
+            orderHistory = listOf(histRecord) + curCourier.orderHistory
+          )
+        }
+      } else {
+        current[index] = updated
+        _orders.value = current
+        if (_activeOrder.value?.id == orderId) {
+          _activeOrder.value = updated
+        }
       }
       _toastEvents.tryEmit("Статус заказа: ${newStatus.titleRu}")
     }
   }
 
+  override suspend fun updateCourierLocation(orderId: String, lat: Double, lng: Double, heading: Float) {
+    val current = _orders.value.toMutableList()
+    val index = current.indexOfFirst { it.id == orderId }
+    if (index != -1) {
+      val updated = current[index].copy(
+        courierLat = lat,
+        courierLng = lng,
+        courierHeading = heading
+      )
+      current[index] = updated
+      _orders.value = current
+      if (_activeOrder.value?.id == orderId) {
+        _activeOrder.value = updated
+      }
+    } else if (_activeOrder.value?.id == orderId) {
+      _activeOrder.value = _activeOrder.value?.copy(
+        courierLat = lat,
+        courierLng = lng,
+        courierHeading = heading
+      )
+    }
+  }
+
+  override suspend fun removeExpiredOrders() {
+    val now = System.currentTimeMillis()
+    val current = _orders.value
+    val filtered = current.filterNot { it.isExpired(now) }
+    if (filtered.size != current.size) {
+      _orders.value = filtered
+      if (_activeOrder.value?.let { it.isExpired(now) } == true) {
+        _activeOrder.value = null
+      }
+    }
+  }
+
+  override suspend fun deleteOrderPermanently(orderId: String) {
+    _orders.value = _orders.value.filterNot { it.id == orderId }
+    if (_activeOrder.value?.id == orderId) {
+      _activeOrder.value = null
+    }
+  }
+
+  override suspend fun clearOrderHistory() {
+    val curCourier = _courierProfile.value
+    _courierProfile.value = curCourier.copy(
+      orderHistory = emptyList(),
+      shiftGrossRub = 0
+    )
+    _orders.value = emptyList()
+    _activeOrder.value = null
+    _toastEvents.tryEmit("История заказов полностью очищена")
+  }
+
   private fun generateInitialYakutskOrders(): List<DeliveryOrder> {
+    val now = System.currentTimeMillis()
     return listOf(
       DeliveryOrder(
         id = "ord_ykt_1",
@@ -252,8 +342,9 @@ class LocalPropDeliveryRepository(
         senderPhone = "+7 (914) 271-88-00",
         clientName = "Саргылана М.",
         clientRating = 4.9,
-        status = OrderStatus.BARGAINING,
-        createdAt = System.currentTimeMillis() - 120000,
+        status = OrderStatus.NEW,
+        createdAt = now,
+        expiresAt = now + 15_000L,
         startLat = 62.0285f,
         startLng = 129.7330f,
         endLat = 62.0380f,
@@ -273,7 +364,8 @@ class LocalPropDeliveryRepository(
         clientName = "Петр С.",
         clientRating = 5.0,
         status = OrderStatus.NEW,
-        createdAt = System.currentTimeMillis() - 300000,
+        createdAt = now,
+        expiresAt = now + 15_000L,
         startLat = 62.0310f,
         startLng = 129.7280f,
         endLat = 62.0190f,
@@ -292,8 +384,9 @@ class LocalPropDeliveryRepository(
         senderPhone = "+7 (914) 299-44-55",
         clientName = "Елена В.",
         clientRating = 4.8,
-        status = OrderStatus.BARGAINING,
-        createdAt = System.currentTimeMillis() - 500000,
+        status = OrderStatus.NEW,
+        createdAt = now,
+        expiresAt = now + 15_000L,
         startLat = 62.0350f,
         startLng = 129.7390f,
         endLat = 62.0260f,

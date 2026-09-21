@@ -33,4 +33,8 @@ interface DeliveryRepository {
   suspend fun clientAcceptBid(orderId: String, bidId: String): Boolean
 
   suspend fun updateOrderStatus(orderId: String, newStatus: OrderStatus)
+  suspend fun updateCourierLocation(orderId: String, lat: Double, lng: Double, heading: Float = 0f)
+  suspend fun removeExpiredOrders()
+  suspend fun deleteOrderPermanently(orderId: String)
+  suspend fun clearOrderHistory()
 }

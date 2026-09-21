@@ -1,9 +1,12 @@
 package com.example
 
+import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -13,16 +16,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.data.location.LocationTrackingManager
 import com.example.data.model.OrderStatus
 import com.example.data.model.UserRole
 import com.example.navigation.NavRoutes
@@ -64,8 +70,43 @@ fun DriveeApp(
   val compactView by viewModel.compactView.collectAsState()
   val soundAlerts by viewModel.soundAlerts.collectAsState()
   val chainOrders by viewModel.chainOrders.collectAsState()
+  val liveActivityText by viewModel.liveActivityEvent.collectAsState()
 
   val snackbarHostState = remember { SnackbarHostState() }
+  val context = LocalContext.current
+  val locationTracker = remember { LocationTrackingManager(context) }
+
+  val permissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.RequestMultiplePermissions()
+  ) { /* Permissions result handled */ }
+
+  LaunchedEffect(Unit) {
+    permissionLauncher.launch(
+      arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+      )
+    )
+  }
+
+  // Real-time GPS location tracking loop when an active order is in progress
+  val trackingOrder = activeOrder ?: selectedOrder
+  LaunchedEffect(trackingOrder?.id, trackingOrder?.status) {
+    val order = trackingOrder
+    if (order != null && (order.status == OrderStatus.ACCEPTED_BY_COURIER || order.status == OrderStatus.IN_TRANSIT)) {
+      locationTracker.startTracking(order) { lat, lng, heading ->
+        viewModel.updateCourierLocation(order.id, lat, lng, heading)
+      }
+    } else {
+      locationTracker.stopTracking()
+    }
+  }
+
+  DisposableEffect(Unit) {
+    onDispose {
+      locationTracker.stopTracking()
+    }
+  }
 
   LaunchedEffect(Unit) {
     viewModel.toastMessage.collect { message ->
@@ -161,6 +202,8 @@ fun DriveeApp(
             viewModel.switchRole()
             navController.navigate(NavRoutes.CLIENT_CREATE)
           },
+          onClearOrderHistory = { viewModel.clearOrderHistory() },
+          liveActivityText = liveActivityText,
           snackbarHostState = snackbarHostState,
           modifier = Modifier.fillMaxSize()
         )
@@ -168,11 +211,14 @@ fun DriveeApp(
 
       // 3. Active Order Details Screen
       composable(NavRoutes.ORDER_DETAIL) {
-        val order = selectedOrder ?: orders.firstOrNull()
+        val order = selectedOrder ?: orders.firstOrNull { it.status != OrderStatus.DELIVERED }
         if (order != null) {
           OrderDetailScreen(
             order = order,
-            onBack = { navController.popBackStack() },
+            onBack = {
+              viewModel.clearSelectedOrder()
+              navController.popBackStack()
+            },
             onAcceptDirect = { viewModel.acceptOrderDirectly(it) },
             onSubmitCounterBid = { orderId, bid -> viewModel.submitCounterBid(orderId, bid) },
             onMarkDelivered = { orderId -> viewModel.markDelivered(orderId) },
@@ -204,6 +250,7 @@ fun DriveeApp(
             viewModel.switchRole()
             navController.navigate(NavRoutes.CLIENT_CREATE)
           },
+          onClearOrderHistory = { viewModel.clearOrderHistory() },
           onBack = { navController.popBackStack() },
           onLogout = {
             navController.navigate(NavRoutes.AUTH) {
@@ -231,14 +278,16 @@ fun DriveeApp(
 
       // 6. Client Waiting Bids Screen
       composable(NavRoutes.CLIENT_WAITING) {
-        val order = activeOrder ?: selectedOrder ?: orders.firstOrNull()
+        val order = activeOrder ?: selectedOrder
         if (order != null) {
           ClientWaitingBidsScreen(
             order = order,
             onAcceptBid = { bidId -> viewModel.clientAcceptBid(bidId) },
             onCancelOrder = {
               viewModel.cancelOrder()
-              navController.popBackStack()
+              navController.navigate(NavRoutes.CLIENT_CREATE) {
+                popUpTo(NavRoutes.CLIENT_CREATE) { inclusive = true }
+              }
             },
             isDarkTheme = isDarkTheme,
             modifier = Modifier.fillMaxSize()

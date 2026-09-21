@@ -83,11 +83,37 @@ fun CourierProfileScreen(
   chainOrders: Boolean,
   onToggleChainOrders: (Boolean) -> Unit,
   onSwitchRole: () -> Unit,
+  onClearOrderHistory: () -> Unit,
   onBack: () -> Unit,
   onLogout: () -> Unit,
   modifier: Modifier = Modifier
 ) {
   var showWithdrawDialog by remember { mutableStateOf(false) }
+  var showClearHistoryDialog by remember { mutableStateOf(false) }
+
+  if (showClearHistoryDialog) {
+    AlertDialog(
+      onDismissRequest = { showClearHistoryDialog = false },
+      title = { Text("Очистить историю смены?", fontWeight = FontWeight.Bold) },
+      text = { Text("История доставленных заказов и счетчики смены будут сброшены.") },
+      confirmButton = {
+        Button(
+          onClick = {
+            showClearHistoryDialog = false
+            onClearOrderHistory()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = DriveeRed, contentColor = Color.White)
+        ) {
+          Text("Очистить", fontWeight = FontWeight.Bold)
+        }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { showClearHistoryDialog = false }) {
+          Text("Отмена")
+        }
+      }
+    )
+  }
 
   Scaffold(
     topBar = {
@@ -299,23 +325,43 @@ fun CourierProfileScreen(
           Text(text = "Закрытые заказы сегодня:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
           Spacer(modifier = Modifier.height(8.dp))
 
-          profile.orderHistory.forEach { hist ->
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-              modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-            ) {
-              Row(
-                modifier = Modifier.padding(8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+          if (profile.orderHistory.isEmpty()) {
+            Text(
+              text = "Пока нет завершенных заказов за смену",
+              fontSize = 12.sp,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          } else {
+            profile.orderHistory.forEach { hist ->
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
               ) {
-                Column {
-                  Text(text = hist.routeText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                  Text(text = hist.timeText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(
+                  modifier = Modifier.padding(8.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column {
+                    Text(text = hist.routeText, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text(text = hist.timeText, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                  }
+                  Text(text = "+${hist.netAmountRub} ₽", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DriveeGreenDark)
                 }
-                Text(text = "+${hist.netAmountRub} ₽", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = DriveeGreenDark)
               }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            OutlinedButton(
+              onClick = { showClearHistoryDialog = true },
+              shape = RoundedCornerShape(10.dp),
+              border = BorderStroke(1.dp, DriveeRed.copy(alpha = 0.5f)),
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = DriveeRed),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("profile_clear_history_btn")
+            ) {
+              Text("Очистить историю смены", fontWeight = FontWeight.Bold, fontSize = 13.sp)
             }
           }
         }

@@ -71,6 +71,43 @@ class MainViewModel(
         _toastMessage.emit(msg)
       }
     }
+    // Periodic ticker: check and remove orders that exceeded 15s without acceptance
+    viewModelScope.launch {
+      while (true) {
+        kotlinx.coroutines.delay(1000L)
+        repository.removeExpiredOrders()
+      }
+    }
+
+    // Live activity ticker for Yakutsk delivery ecosystem
+    viewModelScope.launch {
+      var eventIndex = 0
+      val events = listOf(
+        "🟢 18 курьеров на линии в Якутске • Высокий спрос в центре",
+        "⚡ Заказ на ул. Орджоникидзе принят курьером за 4 сек",
+        "📦 Курьер Айсен В. завершил доставку в 203 мкрн",
+        "🚀 Среднее время подачи курьера сегодня: 6 минут",
+        "🔥 Новый заказ: ул. Пояркова → ул. Курашова (280 ₽)",
+        "💰 Заработок курьеров за смену: в среднем 2 900 ₽"
+      )
+      while (true) {
+        kotlinx.coroutines.delay(6000L)
+        eventIndex = (eventIndex + 1) % events.size
+        _liveActivityEvent.value = events[eventIndex]
+      }
+    }
+  }
+
+  private val _liveActivityEvent = MutableStateFlow("🟢 18 курьеров на линии в Якутске • Спрос высокий")
+  val liveActivityEvent: StateFlow<String> = _liveActivityEvent.asStateFlow()
+
+  val onlineCouriersCount: StateFlow<Int> = MutableStateFlow(18).asStateFlow()
+
+  fun clearOrderHistory() {
+    viewModelScope.launch {
+      repository.clearOrderHistory()
+      _selectedOrder.value = null
+    }
   }
 
   fun onGoogleLogin(uid: String, email: String, displayName: String?, role: UserRole) {
@@ -177,9 +214,21 @@ class MainViewModel(
 
   fun markDelivered(orderId: String) {
     viewModelScope.launch {
+      val finishedOrder = orders.value.find { it.id == orderId } ?: activeOrder.value ?: selectedOrder.value
       repository.updateOrderStatus(orderId, OrderStatus.DELIVERED)
-      _selectedOrder.value = orders.value.find { it.id == orderId }
+      // Provide delivered snapshot for completion screen
+      _selectedOrder.value = finishedOrder?.copy(status = OrderStatus.DELIVERED)
     }
+  }
+
+  fun updateCourierLocation(orderId: String, lat: Double, lng: Double, heading: Float) {
+    viewModelScope.launch {
+      repository.updateCourierLocation(orderId, lat, lng, heading)
+    }
+  }
+
+  fun clearSelectedOrder() {
+    _selectedOrder.value = null
   }
 
   // Client actions
@@ -206,6 +255,13 @@ class MainViewModel(
   }
 
   fun cancelOrder() {
+    val order = activeOrder.value ?: selectedOrder.value
+    if (order != null) {
+      viewModelScope.launch {
+        repository.deleteOrderPermanently(order.id)
+      }
+    }
+    _selectedOrder.value = null
     _currentScreen.value = AppScreen.CLIENT_CREATE
   }
 

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -49,6 +50,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,9 +98,54 @@ fun OrderDetailScreen(
     order.priceRub + 70
   )
 
+  var showDeliveredSuccessDialog by remember { mutableStateOf(false) }
+
   val isTaken = order.status == OrderStatus.TAKEN_BY_OTHER
   val isAccepted = order.status == OrderStatus.ACCEPTED_BY_COURIER || order.status == OrderStatus.IN_TRANSIT
   val isDelivered = order.status == OrderStatus.DELIVERED
+
+  if (showDeliveredSuccessDialog) {
+    AlertDialog(
+      onDismissRequest = {
+        showDeliveredSuccessDialog = false
+        onBack()
+      },
+      icon = {
+        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DriveeGreen, modifier = Modifier.size(44.dp))
+      },
+      title = {
+        Text("Заказ успешно выполнен!", fontWeight = FontWeight.Bold)
+      },
+      text = {
+        Column {
+          Text("Вы успешно доставили заказ #${order.id.takeLast(4)}.")
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            "+${order.priceRub} ₽ начислено на ваш баланс.",
+            fontWeight = FontWeight.Bold,
+            color = DriveeGreenDark
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            "Заказ закрыт и больше не отображается в активной ленте.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 13.sp
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            showDeliveredSuccessDialog = false
+            onBack()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = DriveeGreen, contentColor = Color.Black)
+        ) {
+          Text("К списку заказов", fontWeight = FontWeight.Bold)
+        }
+      }
+    )
+  }
 
   Scaffold(
     topBar = {
@@ -143,17 +190,25 @@ fun OrderDetailScreen(
         .padding(innerPadding)
         .verticalScroll(rememberScrollState())
     ) {
-      // 1. Interactive Route Map
+      // 1. Interactive Route Map with Option B Google Maps
       InteractiveRouteMap(
         modifier = Modifier
           .fillMaxWidth()
-          .height(240.dp)
+          .height(250.dp)
           .testTag("detail_interactive_map"),
         distanceKm = order.distanceKm,
         etaMinutes = order.etaMinutes,
         isDarkTheme = isDarkTheme,
         pickupAddress = order.pickupAddress,
-        dropoffAddress = order.dropoffAddress
+        dropoffAddress = order.dropoffAddress,
+        startLat = order.startLat.toDouble(),
+        startLng = order.startLng.toDouble(),
+        endLat = order.endLat.toDouble(),
+        endLng = order.endLng.toDouble(),
+        courierLat = order.courierLat,
+        courierLng = order.courierLng,
+        courierHeading = order.courierHeading,
+        isLiveTracking = isTaken || order.status == OrderStatus.ACCEPTED_BY_COURIER || order.status == OrderStatus.IN_TRANSIT
       )
 
       Column(modifier = Modifier.padding(16.dp)) {
@@ -273,25 +328,30 @@ fun OrderDetailScreen(
                 ) {
                   Icon(Icons.Default.Map, contentDescription = null, tint = DriveeGreenDark, modifier = Modifier.size(16.dp))
                   Spacer(modifier = Modifier.width(6.dp))
-                  Text("Карта активна выше", color = DriveeGreenDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                  Text("OSM Карта активна", color = DriveeGreenDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
               }
 
               OutlinedButton(
                 onClick = {
                   try {
-                    val uri = Uri.parse("https://www.google.com/maps/dir/?api=1&origin=${Uri.encode(order.pickupAddress + ", " + order.city)}&destination=${Uri.encode(order.dropoffAddress + ", " + order.city)}&travelmode=driving")
+                    val uri = Uri.parse("geo:${order.startLat},${order.startLng}?q=${Uri.encode(order.dropoffAddress + ", " + order.city)}")
                     val mapIntent = Intent(Intent.ACTION_VIEW, uri)
                     context.startActivity(mapIntent)
-                  } catch (_: Exception) {}
+                  } catch (_: Exception) {
+                    try {
+                      val webUri = Uri.parse("https://www.openstreetmap.org/search?query=${Uri.encode(order.dropoffAddress + ", " + order.city)}")
+                      context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                    } catch (_: Exception) {}
+                  }
                 },
-                modifier = Modifier.testTag("detail_open_google_maps_btn"),
+                modifier = Modifier.testTag("detail_open_external_maps_btn"),
                 shape = RoundedCornerShape(10.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
               ) {
                 Icon(Icons.Default.Navigation, contentDescription = null, tint = DriveeGreenDark, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Google Maps", fontSize = 12.sp)
+                Text("Навигатор", fontSize = 12.sp)
               }
             }
           }
@@ -350,19 +410,37 @@ fun OrderDetailScreen(
 
         // Actions: Direct Accept & Bargaining
         if (isDelivered) {
-          Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = DriveeGreenContainer,
-            modifier = Modifier.fillMaxWidth()
+          Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
           ) {
-            Row(
-              modifier = Modifier.padding(16.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.Center
+            Surface(
+              shape = RoundedCornerShape(16.dp),
+              color = DriveeGreenContainer,
+              modifier = Modifier.fillMaxWidth()
             ) {
-              Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DriveeGreenDark)
-              Spacer(modifier = Modifier.width(8.dp))
-              Text(text = "Заказ успешно доставлен!", fontWeight = FontWeight.Bold, color = DriveeGreenDark)
+              Column(
+                modifier = Modifier.padding(18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+              ) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DriveeGreenDark, modifier = Modifier.size(38.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = "Заказ успешно доставлен!", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = DriveeGreenDark)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(text = "+${order.priceRub} ₽ начислено на ваш баланс", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+              }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+            Button(
+              onClick = onBack,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("detail_return_to_feed_btn"),
+              shape = RoundedCornerShape(14.dp),
+              colors = ButtonDefaults.buttonColors(containerColor = DriveeGreen, contentColor = Color.Black)
+            ) {
+              Text("Вернуться в ленту заказов", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
           }
         } else if (isAccepted) {
@@ -383,7 +461,10 @@ fun OrderDetailScreen(
             }
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-              onClick = { onMarkDelivered(order.id) },
+              onClick = {
+                onMarkDelivered(order.id)
+                showDeliveredSuccessDialog = true
+              },
               modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)

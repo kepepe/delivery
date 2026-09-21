@@ -22,7 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.LocationCity
 import androidx.compose.material.icons.filled.Person
@@ -283,7 +283,7 @@ fun ProfileSetupScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
               ) {
                 Icon(
-                  imageVector = Icons.Default.DirectionsBike,
+                  imageVector = Icons.Default.LocalShipping,
                   contentDescription = null,
                   tint = if (selectedRole == UserRole.COURIER) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
                 )
